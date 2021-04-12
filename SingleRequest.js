@@ -44,12 +44,19 @@ class SingleRequest {
 
 	async RethinkModule(commonContext, thisRequest, event) {
 		let retryCount = 0;
-		let retryLimit = 5;
+		let retryLimit = 150;
 		while (commonContext.NowLoading == true) {
 			if (retryCount >= retryLimit) {
 				break
 			}
-			await sleep(10)
+			await sleep(50)
+			if(commonContext.LoadingError == true){
+				thisRequest.StopProcessing = true
+				thisRequest.IsException = true
+				thisRequest.exception = commonContext.exception
+				thisRequest.exceptionFrom = commonContext.exceptionFrom
+				return
+			}
 			retryCount++
 		}
 		if (commonContext.loaded == true) {
@@ -57,7 +64,7 @@ class SingleRequest {
 		}
 		else {
 			thisRequest.StopProcessing = true
-			thisRequest.CustomResponse("SingleRequest.js RethinkModule","Problem in loading commonContext")
+			thisRequest.CustomResponse("SingleRequest.js RethinkModule","Problem in loading commonContext - Waiting Timeout")
 		}
 	}
 
@@ -76,6 +83,7 @@ class SingleRequest {
 			catch (e) {
 				this.StopProcessing = true
 				this.IsDnsParseException = true
+				this.IsException = true
 				this.exception = e
 				this.exceptionFrom = "SingleRequest.js SingleRequest Init"
 			}
