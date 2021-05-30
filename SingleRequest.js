@@ -13,6 +13,8 @@ class SingleRequest {
 		this.responseBlocklistUintarr = ""
 		this.responseBlocklistTag = ""
 		this.responseB64flag = ""
+		this.responseB64flagDomainInBlockListNotBlocked = ""
+		this.responseBlocklistTagDomainInBlockListNotBlocked = ""
 		this.UserId = ""
 		this.DeviceId = ""
 		this.DomainName = ""
@@ -32,8 +34,11 @@ class SingleRequest {
 		this.Debug = true
 		this.IsDnsBlock = false
 		this.IsCnameDnsBlock = false
+		this.IsDomainInBlockListNotBlocked = false
 		this.IsInvalidFlagBlock = false
 		this.StopProcessing = false
+		this.dnsResolverDomainName = ""
+		this.dnsResolverPathName = ""
 	}
 
 	AddFlow(data) {
@@ -50,7 +55,7 @@ class SingleRequest {
 				break
 			}
 			await sleep(50)
-			if(commonContext.LoadingError == true){
+			if (commonContext.LoadingError == true) {
 				thisRequest.StopProcessing = true
 				thisRequest.IsException = true
 				thisRequest.exception = commonContext.exception
@@ -64,29 +69,18 @@ class SingleRequest {
 		}
 		else {
 			thisRequest.StopProcessing = true
-			thisRequest.CustomResponse("SingleRequest.js RethinkModule","Problem in loading commonContext - Waiting Timeout")
+			thisRequest.CustomResponse("SingleRequest.js RethinkModule", "Problem in loading commonContext - Waiting Timeout")
 		}
 	}
 
 	async Init(event, commonContext) {
 		try {
-			let dns = new DnsWork()
 			this.httpRequest = event.request
-			getsetUserDeviceId.call(this, new URL(this.httpRequest.url))			
+			this.dnsResolverDomainName = commonContext.GlobalContext.CFmember.dnsResolverDomainName
+			this.dnsResolverPathName = commonContext.GlobalContext.CFmember.dnsResolverPathName
+			getsetUserDeviceId.call(this, new URL(this.httpRequest.url))
 			loadUserFromCache.call(this, commonContext)
-			try {
-				let tmpReq = await this.httpRequest.clone();
-				this.DecodedDnsPacket = await dns.Decode(await tmpReq.arrayBuffer())
-				this.DomainName = this.DecodedDnsPacket.questions[0].name.trim().toLowerCase()
-				this.DomainNameInfo = this.GetDomainInfo(commonContext, this.DomainName, event)
-			}
-			catch (e) {
-				this.StopProcessing = true
-				this.IsDnsParseException = true
-				this.IsException = true
-				this.exception = e
-				this.exceptionFrom = "SingleRequest.js SingleRequest Init"
-			}
+			await loadDnsFromRequest.call(this, commonContext, event)
 		}
 		catch (e) {
 			this.StopProcessing = true
@@ -163,7 +157,14 @@ class SingleRequest {
 		this.httpResponse.headers.delete('cf-ray')
 	}
 
+	DnsResponse() {
+		if (this.IsDomainInBlockListNotBlocked) {
+			this.httpResponse = new Response(this.httpResponse.body, this.httpResponse)
+			this.httpResponse.headers.set('x-nile-flag-notblocked', this.responseB64flagDomainInBlockListNotBlocked)
 
+		}
+		return this.httpResponse
+	}
 	DnsBlockResponse() {
 		try {
 			let dns = new DnsWork()
@@ -233,5 +234,38 @@ function getsetUserDeviceId(Url) {
 	this.DeviceId = this.DeviceId.trim()
 }
 
+async function loadDnsFromRequest(commonContext, event) {
+	let dnsPacketBuffer
+	let dns = new DnsWork()
+	try {
+		if (this.httpRequest.method === "GET") {
+			let QueryString = (new URL(this.httpRequest.url)).searchParams
+			dnsPacketBuffer = base64ToArrayBuffer(decodeURI(QueryString.get("dns")))
+		}
+		else {
+			let tmpReq = await this.httpRequest.clone();
+			dnsPacketBuffer = await tmpReq.arrayBuffer()
+		}
+		this.DecodedDnsPacket = await dns.Decode(dnsPacketBuffer)
+		this.DomainName = this.DecodedDnsPacket.questions[0].name.trim().toLowerCase()
+		this.DomainNameInfo = this.GetDomainInfo(commonContext, this.DomainName, event)
+	}
+	catch (e) {
+		this.StopProcessing = true
+		this.IsDnsParseException = true
+		this.IsException = true
+		this.exception = e
+		this.exceptionFrom = "SingleRequest.js SingleRequest Init loadDnsFromRequest"
+	}
+}
 
+function base64ToArrayBuffer(base64) {
+	var binary_string = atob(base64);
+	var len = binary_string.length;
+	var bytes = new Uint8Array(len);
+	for (var i = 0; i < len; i++) {
+		bytes[i] = binary_string.charCodeAt(i);
+	}
+	return bytes.buffer;
+}
 module.exports.SingleRequest = SingleRequest
